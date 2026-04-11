@@ -205,11 +205,13 @@ def compute_downside_correlation(returns: pd.DataFrame) -> pd.DataFrame:
 # =============================
 # Data download
 # =============================
+@st.cache_data(ttl=3600, show_spinner=False)
 def download_weekly_prices(tickers: List[str], years: int = DEFAULT_YEARS) -> Tuple[pd.DataFrame, Dict[str, str]]:
     errors: Dict[str, str] = {}
     if not tickers:
         return pd.DataFrame(), {"input": "No tickers provided."}
 
+    tickers = [str(t).upper().strip() for t in tickers]
     end = pd.Timestamp.today().normalize() + pd.Timedelta(days=1)
     start = end - pd.DateOffset(years=years, months=2)
 
@@ -243,16 +245,17 @@ def download_weekly_prices(tickers: List[str], years: int = DEFAULT_YEARS) -> Tu
             else:
                 col = "Close" if "Close" in raw.columns else raw.columns[0]
                 s = pd.to_numeric(raw[col], errors="coerce").dropna()
+
             if s.empty:
                 errors[t] = "No price data after cleaning"
                 continue
+
             prices[t] = s
         except Exception as e:
             errors[t] = str(e)
 
     prices = prices.sort_index().dropna(how="all")
     return prices, errors
-
 
 # =============================
 # Core computations
@@ -538,16 +541,17 @@ def build_cluster_info(corr_matrix: pd.DataFrame, asset_metrics: pd.DataFrame) -
         return out[["asset", "cluster_id", "cluster_rank"]]
 
     dist = 1 - corr_matrix.fillna(0)
-    np.fill_diagonal(dist.values, 0.0)
-    condensed = squareform(dist.values, checks=False)
+    dist_arr = dist.to_numpy(copy=True)   # 關鍵：強制做可寫入副本
+    np.fill_diagonal(dist_arr, 0.0)
+    condensed = squareform(dist_arr, checks=False)
     link = linkage(condensed, method="average")
     cluster_ids = fcluster(link, t=CLUSTER_DISTANCE_THRESHOLD, criterion="distance")
+
     out = pd.DataFrame({"asset": assets, "cluster_id": cluster_ids})
     score_map = asset_metrics.set_index("asset")["AssetQualityScore"] if not asset_metrics.empty else pd.Series(dtype=float)
     out["AssetQualityScore"] = out["asset"].map(score_map)
     out["cluster_rank"] = out.groupby("cluster_id")["AssetQualityScore"].rank(ascending=False, method="dense")
     return out[["asset", "cluster_id", "cluster_rank"]]
-
 
 def build_dashboard_tables(
     asset_metrics: pd.DataFrame,
@@ -587,8 +591,10 @@ def plot_pair_heatmap(pair_df: pd.DataFrame, assets: List[str]):
         heat.loc[row["asset_a"], row["asset_b"]] = row["Pair_gain_score"]
         heat.loc[row["asset_b"], row["asset_a"]] = row["Pair_gain_score"]
 
+    heat_arr = heat.to_numpy(copy=False)
+
     fig, ax = plt.subplots(figsize=(8, 6))
-    im = ax.imshow(heat.values, aspect="auto")
+    im = ax.imshow(heat_arr, aspect="auto")
 
     ax.set_xticks(range(len(assets)))
     ax.set_xticklabels(assets, rotation=90)
@@ -597,7 +603,7 @@ def plot_pair_heatmap(pair_df: pd.DataFrame, assets: List[str]):
 
     for i in range(len(assets)):
         for j in range(len(assets)):
-            val = heat.values[i, j]
+            val = heat_arr[i, j]
             if not np.isnan(val):
                 ax.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=8)
 
@@ -610,9 +616,10 @@ def plot_pair_heatmap(pair_df: pd.DataFrame, assets: List[str]):
 
 def plot_downside_corr_heatmap(corr_matrix: pd.DataFrame):
     assets = list(corr_matrix.index)
+    corr_arr = corr_matrix.to_numpy(copy=False)
 
     fig, ax = plt.subplots(figsize=(8, 6))
-    im = ax.imshow(corr_matrix.values, aspect="auto", vmin=-1, vmax=1)
+    im = ax.imshow(corr_arr, aspect="auto", vmin=-1, vmax=1)
 
     ax.set_xticks(range(len(assets)))
     ax.set_xticklabels(assets, rotation=90)
@@ -621,7 +628,7 @@ def plot_downside_corr_heatmap(corr_matrix: pd.DataFrame):
 
     for i in range(len(assets)):
         for j in range(len(assets)):
-            val = corr_matrix.values[i, j]
+            val = corr_arr[i, j]
             if not np.isnan(val):
                 ax.text(j, i, f"{val:.2f}", ha="center", va="center", fontsize=8)
 
