@@ -1,3 +1,9 @@
+"""DEPRECATED legacy exploratory app.
+
+Use ``streamlit run app.py`` for the production research dashboard. The score
+and classification outputs in this file are unvalidated exploratory heuristics.
+"""
+
 import io
 import math
 import traceback
